@@ -117,6 +117,9 @@
       <p class="card-label">Configuration</p>
       <label>Anthropic API Key</label>
       <input type="password" id="api-key" placeholder="sk-ant-..." autocomplete="off">
+      <label>SerpApi Key</label>
+      <input type="password" id="serp-key" placeholder="your SerpApi key..." autocomplete="off">
+      <p class="hint">Free at <a href="https://serpapi.com" target="_blank">serpapi.com</a> (100 searches/month). Stays in your browser only.</p>
       <p class="hint">Get yours at <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a></p>
       <label>Check Interval</label>
       <select id="interval">
@@ -179,8 +182,8 @@ const W=[
   {ci:'2026-08-25',co:'2026-08-27',l:'Aug 25-27',s:'Tue-Thu'},
 ];
 let sel=new Set(W.map((_,i)=>i)),res={},logs=[],checks=0,nxt=null,mt=null,st=null,busy=false;
-function load(){try{const d=JSON.parse(localStorage.getItem('phm4')||'null');if(!d)return;if(d.sel)sel=new Set(d.sel);if(d.res)res=d.res;if(d.checks)checks=d.checks;if(d.logs)logs=d.logs;if(d.key)document.getElementById('api-key').value=d.key;}catch(e){}}
-function save(){try{localStorage.setItem('phm4',JSON.stringify({sel:[...sel],res,checks,logs,key:document.getElementById('api-key').value}));}catch(e){}}
+function load(){try{const d=JSON.parse(localStorage.getItem('phm4')||'null');if(!d)return;if(d.sel)sel=new Set(d.sel);if(d.res)res=d.res;if(d.checks)checks=d.checks;if(d.logs)logs=d.logs;if(d.key)document.getElementById('api-key').value=d.key;if(d.serpKey)document.getElementById('serp-key').value=d.serpKey;}catch(e){}}
+function save(){try{localStorage.setItem('phm4',JSON.stringify({sel:[...sel],res,checks,logs,key:document.getElementById('api-key').value,serpKey:document.getElementById('serp-key').value}));}catch(e){}}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function ts(){return new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
 function addLog(msg,type){logs.push({t:ts(),msg,type:type||''});if(logs.length>300)logs.shift();renderLog();save();}
@@ -193,20 +196,44 @@ const notifOK=typeof Notification!=='undefined';
 function updNotif(){const b=document.getElementById('nbadge'),btn=document.getElementById('nbtn');if(!notifOK){b.className='nbadge denied';b.textContent='not supported';btn.style.display='none';return;}const p=Notification.permission;b.className='nbadge '+p;b.textContent=p;btn.style.display=p==='default'?'inline-flex':'none';}
 function reqNotif(){if(notifOK)Notification.requestPermission().then(updNotif);}
 function notify(title,body){if(notifOK&&Notification.permission==='granted')try{new Notification(title,{body});}catch(e){}}
-async function api(key,messages,tools){const safeKey=key.replace(/[^\x20-\x7E]/g,'');const body={model:'claude-sonnet-4-6',max_tokens:1024,messages};if(tools&&tools.length)body.tools=tools;const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':safeKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify(body)});if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||'API error '+r.status);}return r.json();}
-async function checkWin(i){const w=W[i],key=document.getElementById('api-key').value.trim().replace(/[^\x20-\x7E]/g,''),pref=document.getElementById('room-pref').value;if(!key)return{status:'error',msg:'No API key entered'};res[i]={status:'checking'};renderGrid();
-// Format dates as human readable for search
-const cin=new Date(w.ci+'T12:00:00');const cout=new Date(w.co+'T12:00:00');
-const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
-const cinStr=`${months[cin.getMonth()]} ${cin.getDate()} 2026`;
-const coutStr=`${months[cout.getMonth()]} ${cout.getDate()} 2026`;
-try{addLog(`  Searching availability for ${w.l}...`);
-const sd=await api(key,[{role:'user',content:`Search for Posthotel Leavenworth room availability and pricing for check-in ${cinStr} checkout ${coutStr} 2 adults. Search multiple travel sites including kayak.com, expedia.com, hotels.com, and booking.com. Find out if any rooms are available and what the prices are. Report exactly what each site shows.`}],[{type:'web_search_20250305',name:'web_search',max_uses:3}]);
-const raw=(sd.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
-if(!raw||raw.length<50)throw new Error('No search results returned');
-// Extract structured result
-const ed=await api(key,[{role:'user',content:`Based on this travel site search data for Posthotel Leavenworth ${cinStr} to ${coutStr}:\n\n${raw.substring(0,2500)}\n\nIs this hotel showing as available to book on ANY site for those dates? Reply ONLY with raw JSON:\n{"available":true,"rooms":["room type if known"],"price":"$X/night if found","reason":"what you found on which site","confidence":"high/medium/low"}\n\nSet available=true if ANY site shows bookable rooms. Set available=false if all sites show sold out or no results.`}],[]);
-const txt=(ed.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('').replace(/```json\s*/gi,'').replace(/```/g,'').trim();const m=txt.match(/\{[\s\S]*\}/);if(!m)throw new Error('Could not parse result: '+txt.substring(0,100));const p=JSON.parse(m[0]);return{status:p.available?'available':'none',msg:p.reason||'',price:p.price||null,rooms:Array.isArray(p.rooms)?p.rooms:[],confidence:p.confidence||'medium'};}catch(e){return{status:'error',msg:e.message};}}
+async function serpSearch(serpKey, query){
+  const url=`https://serpapi.com/search.json?q=${encodeURIComponent(query)}&api_key=${serpKey}&num=5&hl=en`;
+  const r=await fetch(url);
+  if(!r.ok)throw new Error('SerpApi error '+r.status);
+  const d=await r.json();
+  // Extract organic results as plain text
+  return (d.organic_results||[]).map(x=>`${x.title}\n${x.snippet||''}\n${x.link||''}`).join('\n\n');
+}
+
+async function api(key,messages){const safeKey=key.replace(/[^\x20-\x7E]/g,'');const body={model:'claude-haiku-4-5-20251001',max_tokens:256,messages};const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':safeKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify(body)});if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||'API error '+r.status);}return r.json();}
+
+async function checkWin(i){
+  const w=W[i];
+  const claudeKey=document.getElementById('api-key').value.trim().replace(/[^\x20-\x7E]/g,'');
+  const serpKey=document.getElementById('serp-key').value.trim().replace(/[^\x20-\x7E]/g,'');
+  if(!serpKey)return{status:'error',msg:'No SerpApi key entered'};
+  if(!claudeKey)return{status:'error',msg:'No Anthropic API key entered'};
+  res[i]={status:'checking'};renderGrid();
+
+  try{
+    addLog(`  Searching OTAs for ${w.l}...`);
+    // Run two searches: one on Kayak, one on Expedia/Booking
+    const q1=`Posthotel Leavenworth availability ${w.ci} ${w.co} site:kayak.com OR site:expedia.com`;
+    const q2=`"Posthotel Leavenworth" "${w.ci}" rooms available price per night`;
+    const [r1,r2]=await Promise.all([serpSearch(serpKey,q1),serpSearch(serpKey,q2)]);
+    const searchText=`SEARCH 1:\n${r1}\n\nSEARCH 2:\n${r2}`;
+
+    if(!searchText||searchText.trim().length<50)throw new Error('No search results returned from SerpApi');
+
+    addLog(`  Parsing results...`);
+    const ed=await api(claudeKey,[{role:'user',content:`Here are Google search results about Posthotel Leavenworth availability for check-in ${w.ci}, check-out ${w.co}:\n\n${searchText.substring(0,2000)}\n\nBased ONLY on these search snippets, output raw JSON (no markdown):\n{"available":true,"rooms":["room type"],"price":"$X/night","reason":"what the snippets say","confidence":"high/medium/low"}\n\nSet available=true if snippets mention bookable rooms or prices for those dates. Set available=false if snippets show sold out or no results.`}]);
+    const txt=(ed.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('').replace(/```json\s*/gi,'').replace(/```/g,'').trim();
+    const m=txt.match(/\{[\s\S]*\}/);
+    if(!m)throw new Error('Could not parse result');
+    const p=JSON.parse(m[0]);
+    return{status:p.available?'available':'none',msg:p.reason||'',price:p.price||null,rooms:Array.isArray(p.rooms)?p.rooms:[],confidence:p.confidence||'medium'};
+  }catch(e){return{status:'error',msg:e.message};}
+}
 function fmtInt(){const v=parseInt(document.getElementById('interval').value),m=v/60000;return m<60?m+'m':m/60+'h';}
 async function runPass(){if(busy)return;busy=true;const todo=[...sel];if(!todo.length){addLog('No windows selected.','err');busy=false;return;}checks++;addLog(`-- Check #${checks} started (${todo.length} windows) --`,'info');setStatus('running',`Check #${checks} -- scanning ${todo.length} windows...`);const found=[];for(const i of todo){const w=W[i];addLog(`Checking ${w.l} (${w.ci} -> ${w.co})...`);renderGrid();updStats();const r=await checkWin(i);res[i]=r;renderGrid();if(r.status==='available'){const rl=r.rooms&&r.rooms.length?r.rooms.join(', '):'rooms';const ps=r.price?' . '+r.price:'';addLog(`AVAILABLE: ${w.l} -- ${rl}${ps}`,'found');found.push({w,r});}else if(r.status==='none')addLog(`${w.l} -- ${r.msg||'no availability'}`,'');else addLog(`${w.l} -- error: ${r.msg}`,'err');await new Promise(x=>setTimeout(x,1200));}save();if(found.length){document.getElementById('notif-detail').innerHTML=found.map(({w,r})=>`${w.l} (${w.s}): ${r.rooms&&r.rooms.length?r.rooms.join(', '):'rooms available'}${r.price?' . '+r.price:''}`).join('<br>')+`<br><br>-> <a href="https://bookings.posthotelleavenworth.com/search-rates" target="_blank">Book now</a>`;document.getElementById('notif-banner').classList.add('show');notify('Posthotel Leavenworth -- Available!',found.map(({w})=>w.l).join(', ')+' is available.');setStatus('found',`Availability found! ${found.length} window(s) open.`);addLog(`OK Check #${checks} done. ${found.length} available.`,'found');}else{setStatus('idle',`Check #${checks} complete -- nothing available. Next in ${fmtInt()}.`);addLog(`OK Check #${checks} complete -- no availability.`,'');}updStats();busy=false;}
 function startMonitoring(){const raw=document.getElementById('api-key').value.trim();const key=raw.replace(/[^\x20-\x7E]/g,'');if(!key){addLog('Enter your Anthropic API key first.','err');return;}if(key!==raw){addLog('WARNING: Non-ASCII characters were stripped from your API key. Please re-paste it carefully.','err');document.getElementById('api-key').value=key;}if(!sel.size){addLog('Select at least one date window.','err');return;}save();const ms=parseInt(document.getElementById('interval').value);document.getElementById('start-btn').disabled=true;document.getElementById('stop-btn').disabled=false;addLog(`Monitoring started. Interval: ${fmtInt()}.`,'info');runPass();mt=setInterval(()=>{nxt=Date.now()+ms;runPass();},ms);nxt=Date.now()+ms;st=setInterval(updStats,5000);}
