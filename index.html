@@ -604,28 +604,34 @@ async function fetchBookingPage(checkin, checkout) {
   const target = `https://bookings.posthotelleavenworth.com/search-rates?checkin=${checkin}&checkout=${checkout}&adults=2&rooms=1`;
 
   const proxies = [
-    { url: `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`, json: true  },
-    { url: `https://corsproxy.io/?${encodeURIComponent(target)}`,              json: false },
-    { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`, json: false },
+    { url: `https://corsproxy.io/?url=${encodeURIComponent(target)}`,                          json: false },
+    { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,                 json: false },
+    { url: `https://thingproxy.freeboard.io/fetch/${target}`,                                  json: false },
+    { url: `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,                 json: true  },
+    { url: `https://jsonp.afeld.me/?url=${encodeURIComponent(target)}`,                        json: false },
   ];
 
+  const errors = [];
   for (const p of proxies) {
     try {
       const res = await fetch(p.url);
-      if (!res.ok) continue;
+      if (!res.ok) { errors.push(`${p.url.split('/')[2]}: HTTP ${res.status}`); continue; }
       if (p.json) {
         const data = await res.json();
         const text = data.contents || '';
         if (text.length > 200) return text;
+        errors.push(`${p.url.split('/')[2]}: empty response`);
       } else {
         const text = await res.text();
         if (text.length > 200) return text;
+        errors.push(`${p.url.split('/')[2]}: empty response`);
       }
     } catch(e) {
-      continue; // try next proxy
+      errors.push(`${p.url.split('/')[2]}: ${e.message}`);
+      continue;
     }
   }
-  throw new Error('All proxies failed. Open the app via start-monitor.sh (localhost) instead of as a file:// URL.');
+  throw new Error(`All proxies failed: ${errors.join(' | ')}`);
 }
 
 function parseAvailability(html, checkin, checkout) {
