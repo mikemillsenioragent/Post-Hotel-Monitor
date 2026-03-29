@@ -197,12 +197,16 @@ function updNotif(){const b=document.getElementById('nbadge'),btn=document.getEl
 function reqNotif(){if(notifOK)Notification.requestPermission().then(updNotif);}
 function notify(title,body){if(notifOK&&Notification.permission==='granted')try{new Notification(title,{body});}catch(e){}}
 async function serpSearch(serpKey, query){
-  const url=`https://serpapi.com/search.json?q=${encodeURIComponent(query)}&api_key=${serpKey}&num=5&hl=en`;
-  const r=await fetch(url);
-  if(!r.ok)throw new Error('SerpApi error '+r.status);
-  const d=await r.json();
-  // Extract organic results as plain text
-  return (d.organic_results||[]).map(x=>`${x.title}\n${x.snippet||''}\n${x.link||''}`).join('\n\n');
+  // SerpApi blocks direct browser fetches due to CORS.
+  // Use allorigins as a relay since we're on https (GitHub Pages)
+  const target=`https://serpapi.com/search.json?q=${encodeURIComponent(query)}&api_key=${serpKey}&num=5&hl=en&output=json`;
+  const proxy=`https://api.allorigins.win/get?url=${encodeURIComponent(target)}`;
+  const r=await fetch(proxy);
+  if(!r.ok)throw new Error('Search proxy error '+r.status);
+  const outer=await r.json();
+  const d=JSON.parse(outer.contents||'{}');
+  if(d.error)throw new Error('SerpApi: '+d.error);
+  return (d.organic_results||[]).map(x=>`${x.title}\n${x.snippet||''}`).join('\n\n');
 }
 
 async function api(key,messages){const safeKey=key.replace(/[^\x20-\x7E]/g,'');const body={model:'claude-haiku-4-5-20251001',max_tokens:256,messages};const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':safeKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify(body)});if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||'API error '+r.status);}return r.json();}
